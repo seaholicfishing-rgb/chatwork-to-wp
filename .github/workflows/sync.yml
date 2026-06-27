@@ -2,9 +2,10 @@ name: chatwork-to-wp
 
 on:
   schedule:
-    # JST 7:00〜23:59 の間、15分ごとに実行（UTCに換算: 22-23時台 + 0-14時台）。
-    # GitHub Actionsのscheduleは数分の遅延がよくあるので、投稿は最大15分ほどで反映されます。
-    - cron: '4,19,34,49 0-14,22,23 * * *'
+    # JST 6:00〜23:59 の間、5分ごとに実行（UTCに換算: 21-23時台 + 0-14時台）。
+    # 公開リポジトリ＝Actions無料無制限なので短間隔でOK。
+    # ※GitHub Actionsのscheduleは数分の遅延がよくあるため、反映は数分〜十数分かかる場合があります。
+    - cron: '*/5 0-14,21-23 * * *'
   workflow_dispatch:        # 「今すぐ反映したい」時に手動実行できる
 
 permissions:
