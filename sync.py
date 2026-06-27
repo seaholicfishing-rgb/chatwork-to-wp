@@ -403,6 +403,33 @@ def get_image_bytes(room_id, file_info, token):
     return file_info.get("filename", "photo.jpg"), http_download(url)
 
 
+def image_block(media):
+    """アップロード済みメディアから wp:image ブロックHTMLを作る（単体ページに写真を表示）。"""
+    mid = media.get("id")
+    sizes = (media.get("media_details") or {}).get("sizes") or {}
+    src = (sizes.get("large") or {}).get("source_url") or media.get("source_url", "")
+    return (
+        f'<!-- wp:image {{"id":{mid},"sizeSlug":"large","linkDestination":"none"}} -->\n'
+        f'<figure class="wp-block-image size-large">'
+        f'<img src="{src}" alt="" class="wp-image-{mid}"/></figure>\n'
+        f'<!-- /wp:image -->'
+    )
+
+
+def photo_caption_block(lines):
+    """4行（魚種/場所/ロッド/ライン）を既存投稿と同じ黒帯・白文字・中央・23pxで1段落に。"""
+    body = "<br>".join(html_escape(l) for l in lines)
+    return (
+        '<!-- wp:paragraph {"align":"center","style":{"typography":{"fontSize":"23px"},'
+        '"elements":{"link":{"color":{"text":"var:preset|color|white"}}}},'
+        '"backgroundColor":"black","textColor":"white"} -->\n'
+        '<p class="has-text-align-center has-white-color has-black-background-color '
+        'has-text-color has-background has-link-color" style="font-size:23px">'
+        f'{body}</p>\n'
+        '<!-- /wp:paragraph -->'
+    )
+
+
 def publish_photo(wp, ch, parsed, file_info, room_id, token, mention, dry):
     species = parsed["species"]
     body_lines = [parsed["species"], parsed["location"], parsed["rod"], parsed["line"]]
@@ -413,11 +440,14 @@ def publish_photo(wp, ch, parsed, file_info, room_id, token, mention, dry):
         for b in body_lines:
             log(f"          本文: {b}")
         return
-    filename, content = get_image_bytes(room_id, file_info, token)
-    media = wp.upload_media(filename, content)
+    filename, img_bytes = get_image_bytes(room_id, file_info, token)
+    media = wp.upload_media(filename, img_bytes)
     num = wp.next_nes_photos_number()
     title = f"NES PHOTOS {num:03d} – {species}"
-    html = "\n".join(f"<p>{html_escape(b)}</p>" for b in body_lines)
+    # 既存投稿と同じ構成: 本文先頭に写真ブロック → 空行 → 黒帯キャプション
+    html = (image_block(media)
+            + '\n\n<!-- wp:paragraph -->\n<p><br></p>\n<!-- /wp:paragraph -->\n\n'
+            + photo_caption_block(body_lines))
     res = wp.create_post(ch["post_type"], title, html,
                          status=ch.get("status", "publish"),
                          featured_media=media.get("id"))
@@ -432,8 +462,8 @@ def publish_news(wp, ch, parsed, file_info, room_id, token, mention, dry):
     if parsed.get("link"):
         paras.append(f'<a href="{html_escape(parsed["link"])}" target="_blank" '
                      f'rel="noopener">{html_escape(parsed["link"])}</a>')
-    html = "\n".join(f"<p>{p}</p>" if p.startswith("<a ")
-                     else f"<p>{html_escape(p)}</p>" for p in paras)
+    body_html = "\n".join(f"<p>{p}</p>" if p.startswith("<a ")
+                          else f"<p>{html_escape(p)}</p>" for p in paras)
     if dry:
         extra = f" / 画像 {file_info.get('filename')}" if file_info else ""
         log(f"  [news] 投稿予定: {title}{extra}")
@@ -441,10 +471,12 @@ def publish_news(wp, ch, parsed, file_info, room_id, token, mention, dry):
             log(f"          本文: {p}")
         return
     media_id = None
+    html = body_html
     if file_info:
-        filename, content = get_image_bytes(room_id, file_info, token)
-        media = wp.upload_media(filename, content)
+        filename, img_bytes = get_image_bytes(room_id, file_info, token)
+        media = wp.upload_media(filename, img_bytes)
         media_id = media.get("id")
+        html = image_block(media) + "\n\n" + body_html   # 写真を本文先頭に表示
     res = wp.create_post(ch["post_type"], title, html,
                          status=ch.get("status", "publish"),
                          featured_media=media_id)
