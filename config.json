@@ -1,7 +1,7 @@
 {
   "wp_base_url": "https://northedge-standard.com",
-  "notify_mention_id": "11469381",
-  "_notify_note": "投稿完了を通知する宛先のChatworkアカウントID。空文字にするとメンションなし。",
+  "notify_mention_id": "2238339",
+  "_notify_note": "投稿完了を通知する宛先のChatworkアカウントID。2238339=sohei0801(山田さん本人)。空文字にするとメンションなし。",
   "channels": {
     "photos": {
       "room_id": "440654660",
