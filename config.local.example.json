@@ -1,0 +1,6 @@
+{
+  "_README": "このファイルを config.local.json にコピーし、ローカルPCで実行する時の秘密情報を入れます。GitHub Actionsでは使わず、代わりに Secrets を使います。config.local.json は .gitignore 済みで公開されません。",
+  "CHATWORK_TOKEN": "ここにChatwork APIトークン",
+  "WP_USER": "sohei",
+  "WP_APP_PASSWORD": "WordPressのアプリケーションパスワード（xxxx xxxx xxxx xxxx xxxx xxxx）"
+}

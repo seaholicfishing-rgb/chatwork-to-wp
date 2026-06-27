@@ -1,0 +1,19 @@
+{
+  "wp_base_url": "https://northedge-standard.com",
+  "notify_mention_id": "11469381",
+  "_notify_note": "投稿完了を通知する宛先のChatworkアカウントID。空文字にするとメンションなし。",
+  "channels": {
+    "photos": {
+      "room_id": "440654660",
+      "post_type": "posts",
+      "status": "publish",
+      "_note": "📷 NES PHOTOS 投稿用ルーム → 通常投稿(post)。タイトルは NES PHOTOS NNN を自動採番。"
+    },
+    "news": {
+      "room_id": "440654661",
+      "post_type": "news",
+      "status": "publish",
+      "_note": "📰 NES NEWS 投稿用ルーム → newsカスタム投稿タイプ。"
+    }
+  }
+}
