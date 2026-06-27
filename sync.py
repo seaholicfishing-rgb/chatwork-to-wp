@@ -146,6 +146,16 @@ def cw_post_message(room_id, body, token):
     return cw_request("POST", f"/rooms/{room_id}/messages", token, data={"body": body})
 
 
+def cw_get_me(token):
+    return cw_request("GET", "/me", token) or {}
+
+
+def is_system_message(body):
+    """Chatworkの自動システムメッセージ（部屋作成・説明変更・メンバー変更など）か。
+    ※ファイルアップロード [dtext:file_uploaded] は実投稿なので対象外。"""
+    return "[dtext:chatroom_" in (body or "")
+
+
 # ============================================================
 # Chatwork メッセージ本文のクリーニング / テンプレ解析
 # ============================================================
@@ -232,6 +242,9 @@ def parse_photo(body):
 
     if not fields["species"]:
         return None
+    # 雑談の誤判定防止: ラベル使用 or 3行以上 のときだけ「写真テンプレ」とみなす
+    if not used_labels and len(lines) < 3:
+        return None
     fields["extras"] = extras
     return fields
 
@@ -291,6 +304,10 @@ def parse_news(body):
         result["body"] = "\n".join(nonempty[1:]).strip()
 
     if not result["title"]:
+        return None
+    # 雑談の誤判定防止: ラベル使用 or 2行以上（タイトル＋本文）のときだけ NEWS とみなす
+    nonempty = [l for l in raw_lines if l.strip()]
+    if not has_label and len(nonempty) < 2:
         return None
     return result
 
@@ -386,116 +403,128 @@ def get_image_bytes(room_id, file_info, token):
     return file_info.get("filename", "photo.jpg"), http_download(url)
 
 
-PHOTO_GUIDE = (
-    "⚠️ 写真の取り込みに失敗しました。下記の形式で「写真1枚」と一緒に投稿してください。\n"
-    "[info][title]NES PHOTOS テンプレ[/title]"
-    "魚種: RAINBOW TROUT\n"
-    "場所: NORTHERN HOKKAIDO\n"
-    "ロッド: NES 480-4 8'0\" #4/5\n"
-    "ライン: NES-FLAT MAGIC SHOOTING LINE 35lb proto[/info]\n"
-    "※ラベル無しで「魚種・場所・ロッド・ライン」を4行で書いてもOKです。"
-)
-
-NEWS_GUIDE = (
-    "⚠️ 投稿の取り込みに失敗しました。下記の形式で投稿してください（写真は任意）。\n"
-    "[info][title]NEWS テンプレ[/title]"
-    "タイトル: 公式LINEを開設しました\n"
-    "本文: 友だち登録はこちらから。最新情報をお届けします。[/info]\n"
-    "※ラベル無しで「1行目=タイトル、2行目以降=本文」でもOKです。"
-)
-
-
-def process_photo(msg, files_map, wp, ch, mention, room_id, token, dry):
-    mid = str(msg["message_id"])
-    sender = (msg.get("account") or {}).get("name", "?")
-    parsed = parse_photo(msg.get("body", ""))
-    file_info = files_map.get(mid)
-
-    if parsed is None or file_info is None:
-        reason = []
-        if parsed is None:
-            reason.append("テンプレ未検出")
-        if file_info is None:
-            reason.append("画像なし")
-        log(f"  [photos] msg {mid} ({sender}) スキップ: {' / '.join(reason)}")
-        if not dry:
-            cw_post_message(room_id, PHOTO_GUIDE, token)
-        return False
-
+def publish_photo(wp, ch, parsed, file_info, room_id, token, mention, dry):
     species = parsed["species"]
     body_lines = [parsed["species"], parsed["location"], parsed["rod"], parsed["line"]]
     body_lines += parsed.get("extras", [])
     body_lines = [b for b in body_lines if b]
-
     if dry:
-        log(f"  [photos] msg {mid} ({sender}) → 投稿予定:")
-        log(f"          タイトル: NES PHOTOS NNN – {species}")
+        log(f"  [photos] 投稿予定: NES PHOTOS NNN – {species} / 画像 {file_info.get('filename')}")
         for b in body_lines:
             log(f"          本文: {b}")
-        log(f"          画像: {file_info.get('filename')}")
-        return True
-
+        return
     filename, content = get_image_bytes(room_id, file_info, token)
     media = wp.upload_media(filename, content)
-    media_id = media.get("id")
-
     num = wp.next_nes_photos_number()
     title = f"NES PHOTOS {num:03d} – {species}"
     html = "\n".join(f"<p>{html_escape(b)}</p>" for b in body_lines)
     res = wp.create_post(ch["post_type"], title, html,
                          status=ch.get("status", "publish"),
-                         featured_media=media_id)
+                         featured_media=media.get("id"))
     link = res.get("link", "")
     log(f"  [photos] 公開: {title} ({link})")
     cw_post_message(room_id, f"{mention}✅ HPに公開しました\n{title}\n{link}", token)
-    return True
 
 
-def process_news(msg, files_map, wp, ch, mention, room_id, token, dry):
-    mid = str(msg["message_id"])
-    sender = (msg.get("account") or {}).get("name", "?")
-    parsed = parse_news(msg.get("body", ""))
-
-    if parsed is None:
-        log(f"  [news] msg {mid} ({sender}) スキップ: テンプレ未検出")
-        if not dry:
-            cw_post_message(room_id, NEWS_GUIDE, token)
-        return False
-
+def publish_news(wp, ch, parsed, file_info, room_id, token, mention, dry):
     title = parsed["title"]
     paras = [p for p in parsed["body"].split("\n") if p.strip()]
     if parsed.get("link"):
         paras.append(f'<a href="{html_escape(parsed["link"])}" target="_blank" '
                      f'rel="noopener">{html_escape(parsed["link"])}</a>')
-    html = "\n".join(f"<p>{html_escape(p)}</p>" if not p.startswith("<a ")
-                     else f"<p>{p}</p>" for p in paras)
-    file_info = files_map.get(mid)
-
+    html = "\n".join(f"<p>{p}</p>" if p.startswith("<a ")
+                     else f"<p>{html_escape(p)}</p>" for p in paras)
     if dry:
-        log(f"  [news] msg {mid} ({sender}) → 投稿予定:")
-        log(f"          タイトル: {title}")
+        extra = f" / 画像 {file_info.get('filename')}" if file_info else ""
+        log(f"  [news] 投稿予定: {title}{extra}")
         for p in paras:
             log(f"          本文: {p}")
-        if file_info:
-            log(f"          画像: {file_info.get('filename')}")
-        return True
-
+        return
     media_id = None
     if file_info:
         filename, content = get_image_bytes(room_id, file_info, token)
         media = wp.upload_media(filename, content)
         media_id = media.get("id")
-
     res = wp.create_post(ch["post_type"], title, html,
                          status=ch.get("status", "publish"),
                          featured_media=media_id)
     link = res.get("link", "")
     log(f"  [news] 公開: {title} ({link})")
     cw_post_message(room_id, f"{mention}✅ HPに公開しました\n{title}\n{link}", token)
-    return True
 
 
-PROCESSORS = {"photos": process_photo, "news": process_news}
+def process_channel(key, ch, wp, mention, token, me_id, processed, force_all, dry):
+    """1部屋を処理。写真と文章が別メッセージでも相方としてペア化して投稿する。"""
+    room_id = str(ch["room_id"])
+    msgs = cw_get_messages(room_id, token, force=True)
+    msgs.sort(key=lambda m: (int(m.get("send_time", 0)), str(m.get("message_id"))))
+    files_map = build_files_map(room_id, token)
+
+    # 候補（未処理・Bot自身でない・システムメッセージでない）を時系列で抽出
+    cands = []
+    for m in msgs:
+        mid = str(m["message_id"])
+        if mid in processed and not force_all:
+            continue
+        aid = str((m.get("account") or {}).get("account_id"))
+        body = m.get("body", "")
+        if aid == me_id:                  # Bot自身の投稿（ガイド/完了通知）は対象外
+            processed.add(mid)
+            continue
+        if is_system_message(body):       # 部屋作成・説明変更・メンバー変更など
+            processed.add(mid)
+            continue
+        parsed = parse_photo(body) if key == "photos" else parse_news(body)
+        cands.append({"mid": mid, "author": aid,
+                      "file": files_map.get(mid), "parsed": parsed})
+
+    n = 0
+    pend_img = None    # 写真だけ先に来たメッセージ（文章待ち）
+    pend_tmpl = None   # 文章だけ先に来たメッセージ（写真待ち）
+    for c in cands:
+        try:
+            if key == "photos":
+                if c["parsed"] and c["file"]:                      # 1通に写真＋文章
+                    publish_photo(wp, ch, c["parsed"], c["file"], room_id, token, mention, dry)
+                    processed.add(c["mid"]); n += 1; pend_img = pend_tmpl = None
+                elif c["file"]:                                    # 写真のみ
+                    if pend_tmpl and pend_tmpl["author"] == c["author"]:
+                        publish_photo(wp, ch, pend_tmpl["parsed"], c["file"], room_id, token, mention, dry)
+                        processed.add(c["mid"]); processed.add(pend_tmpl["mid"]); n += 1; pend_tmpl = None
+                    else:
+                        pend_img = c
+                elif c["parsed"]:                                  # 文章のみ
+                    if pend_img and pend_img["author"] == c["author"]:
+                        publish_photo(wp, ch, c["parsed"], pend_img["file"], room_id, token, mention, dry)
+                        processed.add(c["mid"]); processed.add(pend_img["mid"]); n += 1; pend_img = None
+                    else:
+                        pend_tmpl = c
+                else:
+                    processed.add(c["mid"])                        # 写真でも文章でもない→無視
+            else:  # news（写真は任意。文章だけで成立）
+                if c["parsed"]:
+                    paired = pend_img if (pend_img and pend_img["author"] == c["author"]) else None
+                    fi = c["file"] or (paired["file"] if paired else None)
+                    publish_news(wp, ch, c["parsed"], fi, room_id, token, mention, dry)
+                    processed.add(c["mid"])
+                    if paired and not c["file"]:
+                        processed.add(paired["mid"]); pend_img = None
+                    n += 1
+                elif c["file"]:
+                    pend_img = c
+                else:
+                    processed.add(c["mid"])
+        except urllib.error.HTTPError as e:
+            log(f"  msg {c['mid']} 失敗 HTTP {e.code}: {e.read().decode('utf-8','replace')[:300]}")
+            # 失敗時は未処理のまま（次回再試行）
+        except Exception as e:
+            log(f"  msg {c['mid']} 失敗: {e}")
+
+    if pend_img:
+        log(f"  写真が文章待ちで保留中（次回ペア化）: {pend_img['file'].get('filename')}")
+    if pend_tmpl:
+        log("  文章が写真待ちで保留中（次回ペア化）")
+    return n
 
 
 def main():
@@ -537,24 +566,28 @@ def main():
     state = load_json(STATE_PATH, {})
     channels = cfg["channels"]
 
+    # Bot自身のアカウントID（自分の投稿＝ガイドや完了通知を処理対象から外すため）
+    try:
+        me_id = str(cw_get_me(token).get("account_id", ""))
+    except Exception:
+        me_id = ""
+
     for key, ch in channels.items():
         if args.channel and key != args.channel:
             continue
         room_id = str(ch["room_id"])
         log(f"=== 部屋 {key} (room {room_id}) ===")
-        try:
-            msgs = cw_get_messages(room_id, token, force=True)
-        except urllib.error.HTTPError as e:
-            log(f"  メッセージ取得失敗 HTTP {e.code}: {e.read().decode('utf-8','replace')[:200]}")
-            continue
-        # 古い順に処理
-        msgs.sort(key=lambda m: (int(m.get("send_time", 0)), str(m.get("message_id"))))
 
         room_state = state.setdefault(room_id, {"processed": [], "initialized": False})
         processed = set(str(x) for x in room_state.get("processed", []))
 
         # 初回 or --init はサイレント記録
         if args.init or (not room_state.get("initialized") and not args.force_all):
+            try:
+                msgs = cw_get_messages(room_id, token, force=True)
+            except urllib.error.HTTPError as e:
+                log(f"  メッセージ取得失敗 HTTP {e.code}")
+                continue
             for m in msgs:
                 processed.add(str(m["message_id"]))
             room_state["processed"] = list(processed)[-MAX_PROCESSED_KEEP:]
@@ -562,25 +595,12 @@ def main():
             log(f"  初期化: {len(msgs)}件を処理済みに記録（投稿なし）")
             continue
 
-        files_map = build_files_map(room_id, token)
-        proc = PROCESSORS[key]
-        n_done = 0
-        for m in msgs:
-            mid = str(m["message_id"])
-            if mid in processed and not args.force_all:
-                continue
-            try:
-                ok = proc(m, files_map, wp, ch, mention, room_id, token, args.dry_run)
-                if ok:
-                    n_done += 1
-            except urllib.error.HTTPError as e:
-                detail = e.read().decode("utf-8", "replace")[:300]
-                log(f"  msg {mid} 失敗 HTTP {e.code}: {detail}")
-            except Exception as e:
-                log(f"  msg {mid} 失敗: {e}")
-            finally:
-                if not args.dry_run:
-                    processed.add(mid)
+        try:
+            n_done = process_channel(key, ch, wp, mention, token, me_id,
+                                     processed, args.force_all, args.dry_run)
+        except urllib.error.HTTPError as e:
+            log(f"  メッセージ取得/処理失敗 HTTP {e.code}: {e.read().decode('utf-8','replace')[:200]}")
+            continue
 
         if not args.dry_run:
             room_state["processed"] = list(processed)[-MAX_PROCESSED_KEEP:]
