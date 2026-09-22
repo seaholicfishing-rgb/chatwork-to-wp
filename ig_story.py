@@ -26,7 +26,7 @@ BANNER_PATH = os.path.join(HERE, "story_banner.png")
 CW_API = "https://api.chatwork.com/v2"
 
 STORY_W, STORY_H = 1080, 1920
-BANNER_Y = 1360  # 帯の貼り付け位置（下寄り・IG UIと重ならない高さ）
+BANNER_Y = 1640  # 帯の貼り付け位置（下寄り・IG UIと重ならない高さ）
 
 
 # ============================================================
