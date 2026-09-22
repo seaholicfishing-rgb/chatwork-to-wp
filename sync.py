@@ -56,6 +56,7 @@ CW_API = "https://api.chatwork.com/v2"
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic")
 MAX_PROCESSED_KEEP = 500  # state に残す処理済みID数の上限（肥大化防止）
+IG_CFG = None  # config.json の instagram セクション（main で設定）
 
 
 def log(*a):
@@ -453,7 +454,14 @@ def publish_photo(wp, ch, parsed, file_info, room_id, token, mention, dry):
                          featured_media=media.get("id"))
     link = res.get("link", "")
     log(f"  [photos] 公開: {title} ({link})")
-    cw_post_message(room_id, f"{mention}✅ HPに公開しました\n{title}\n{link}", token)
+    story_note = ""
+    if IG_CFG:
+        import ig_story
+        story_note = ig_story.handle_photo_published(
+            wp, img_bytes, IG_CFG, token, log, title, link)
+    cw_post_message(room_id,
+                    f"{mention}✅ HPに公開しました\n{title}\n{link}{story_note}",
+                    token)
 
 
 def publish_news(wp, ch, parsed, file_info, room_id, token, mention, dry):
@@ -576,6 +584,11 @@ def main():
         log("config.json が読めません。終了します。")
         sys.exit(1)
     cfg_local = load_json(LOCAL_CONFIG_PATH, {})
+
+    global IG_CFG
+    IG_CFG = cfg.get("instagram")
+    if IG_CFG and cfg_local.get("ig_access_token"):
+        IG_CFG = dict(IG_CFG, ig_access_token=cfg_local["ig_access_token"])
 
     token = get_secret(cfg_local, "CHATWORK_TOKEN")
     wp_user = get_secret(cfg_local, "WP_USER")
