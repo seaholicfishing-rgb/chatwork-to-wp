@@ -82,6 +82,27 @@ GitHub Actions が15分ごとに部屋をチェックし、新しい投稿を見
 
 ---
 
+## Instagramトークンの自動リフレッシュ
+
+ストーリーズ自動投稿用の長期トークン（60日有効）は放置すると失効するため、
+`refresh_ig_token.py` で月1回自動リフレッシュしている（Claude Codeの定期タスク `ig-token-refresh`・毎月1日 9:20）。
+
+```
+python refresh_ig_token.py              # リフレッシュ＋Secrets反映＋Chatwork通知
+python refresh_ig_token.py --no-notify  # Chatwork通知なし（手動テスト用）
+```
+
+やること（すべて自動）:
+1. `graph.instagram.com/refresh_access_token` で新しい60日トークンを取得（発行24時間後〜失効前まで何度でも可）
+2. `config.local.json` と `ig_long_token.json` を更新（ローカル同期）
+3. `gh secret set IG_ACCESS_TOKEN` で GitHub Secrets を更新（gh CLI認証済みが前提）
+4. 結果をChatworkインスタグラム通知部屋へ投稿（トークン本体は載せない）
+
+ログは `refresh_log.txt`（gitignore対象）。
+トークンが完全に失効した場合は短命トークンをブラウザで再発行 → `get_long_token.py` からやり直し。
+
+---
+
 ## ローカルでテストする
 
 `config.local.example.json` を `config.local.json` にコピーして秘密情報を記入し:
