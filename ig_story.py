@@ -77,10 +77,10 @@ def _graph_get(url, params):
 
 
 def post_story_api(ig_cfg, access_token, image_url, log):
-    """公開URLの画像をストーリーズとして投稿する。"""
+    """公開URLの画像をストーリーズとして投稿する。
+    Instagramログイン方式のトークンなのでホストは graph.instagram.com（meで自アカウント）。"""
     ver = ig_cfg.get("graph_version", "v23.0")
-    ig_user = ig_cfg["ig_user_id"]
-    base = f"https://graph.facebook.com/{ver}/{ig_user}"
+    base = f"https://graph.instagram.com/{ver}/me"
 
     container = _graph_post(f"{base}/media", {
         "media_type": "STORIES",
@@ -92,7 +92,7 @@ def post_story_api(ig_cfg, access_token, image_url, log):
         raise RuntimeError(f"コンテナ作成失敗: {container}")
 
     # 画像は通常すぐFINISHEDになるが、念のため最大30秒待つ
-    status_url = f"https://graph.facebook.com/{ver}/{cid}"
+    status_url = f"https://graph.instagram.com/{ver}/{cid}"
     for _ in range(6):
         st = _graph_get(status_url, {"fields": "status_code",
                                      "access_token": access_token})

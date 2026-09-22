@@ -18,7 +18,7 @@
   },
   "instagram": {
     "enabled": true,
-    "ig_user_id": "",
+    "ig_user_id": "17841473475007155",
     "graph_version": "v23.0",
     "story_room_id": "440514595",
     "_note": "NES PHOTOS公開時のストーリーズ連携。ig_user_id＋IG_ACCESS_TOKEN(GitHub Secrets)が揃えばGraph APIで自動投稿。未設定の間はstory_room_id(インスタグラム通知部屋)へ画像を送る半自動。enabled:falseで停止。"
